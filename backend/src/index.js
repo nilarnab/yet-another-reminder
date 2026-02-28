@@ -25,6 +25,10 @@ app.use("/api/contests", contestRoutes);  // GET /api/contests/fetch, GET /api/c
 app.use("/auth", authRoutes);             // POST /auth/google
 app.use("/api/deliver", deliverRoutes);   // POST /api/deliver
 
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Auth endpoint    : POST http://localhost:${PORT}/auth/google`);
