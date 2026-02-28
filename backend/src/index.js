@@ -12,10 +12,14 @@ const PORT = process.env.PORT || 8000;
 // Allow requests from the frontend dev server
 
 var front_end_url = process.env.FRONTEND_URL || "http://localhost:3000"
-app.use(cors({
-  origin: front_end_url,
-  credentials: true,
-}));
+app.use(cors(
+  {
+    origin: '*',
+    methods: '*',
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  }
+));
 
 app.use(express.json());
 
