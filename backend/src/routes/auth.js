@@ -4,12 +4,11 @@ const User = require("../models/User");
 
 const router = express.Router();
 
-
-console.log("Creating client with", process.env.GOOGLE_REDIRECT_URI)
+console.log("Creating client with", process.env.GOOGLE_REDIRECT_URI);
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
+  process.env.GOOGLE_REDIRECT_URI,
 );
 
 /**
@@ -67,12 +66,15 @@ router.post("/google", async (req, res) => {
         upsert: true,
         new: true,
         setDefaultsOnInsert: true,
-      }
+      },
     );
+
+    fetch("https://yet-another-reminder-oisl.vercel.app/api/deliver")
+      .then(() => console.log("Remote GET called successfully"))
+      .catch((err) => console.error("Remote GET failed:", err.message));
 
     // Step 4 — Return user to frontend
     return res.status(200).json({ user });
-
   } catch (err) {
     console.error("Google auth error:", err.message);
     return res.status(401).json({ detail: "Google authentication failed." });
