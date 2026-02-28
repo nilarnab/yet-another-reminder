@@ -4,6 +4,8 @@ const User = require("../models/User");
 
 const router = express.Router();
 
+
+console.log("Creating client with", process.env.GOOGLE_REDIRECT_URI)
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
