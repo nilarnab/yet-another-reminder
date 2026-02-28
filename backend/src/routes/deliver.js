@@ -153,6 +153,9 @@ router.post("/", async (req, res) => {
           atLeastOneSuccess = true;
           console.log(`  ✓ Delivered to ${user.email}`);
         }
+        else {
+            console.log(`  ✗ Failed to deliver to ${user.email}`);
+        }
         userResults.push({ email: user.email, success });
       }
 
