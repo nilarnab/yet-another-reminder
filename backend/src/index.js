@@ -18,8 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 // Connect to MongoDB
-connectDB();
-
+await connectDB();
 
 // Routes
 app.use("/api/contests", contestRoutes);  // GET /api/contests/fetch, GET /api/contests
