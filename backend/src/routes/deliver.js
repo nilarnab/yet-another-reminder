@@ -30,22 +30,28 @@ function buildCalendarClient(user) {
  * Get the user's dedicated YAR calendar ID.
  * Creates one if it doesn't exist yet, then saves it to MongoDB.
  */
+
 async function getOrCreateContestCalendar(user, calendar) {
-  if (user.calendarId) return user.calendarId;
+  if (user.calendarId) {
+    try {
+      await calendar.calendars.get({ calendarId: user.calendarId });
+      return user.calendarId;
+    } catch (err) {
+      console.log("Old calendar invalid, recreating...");
+    }
+  }
 
   const newCal = await calendar.calendars.insert({
     requestBody: {
-      summary: "YAR 🏆",
-      description: "Codeforces contests auto-synced by YAR (Yet Another Reminder)",
+      summary: "YAR Codeforces",
+      description: "Codeforces contests auto-synced by YAR",
       timeZone: "UTC",
     },
   });
 
   const calendarId = newCal.data.id;
   await User.findByIdAndUpdate(user._id, { calendarId });
-  user.calendarId = calendarId;
 
-  console.log(`  📅 Created YAR calendar for ${user.email}`);
   return calendarId;
 }
 
@@ -57,6 +63,9 @@ async function createCalendarEvent(user, event) {
   try {
     const calendar = buildCalendarClient(user);
     const calendarId = await getOrCreateContestCalendar(user, calendar);
+
+    console.log("updating user object now");
+    user.calendarId = calendarId;
 
     const endTime = new Date(
       event.startTime.getTime() + event.durationMinutes * 60 * 1000

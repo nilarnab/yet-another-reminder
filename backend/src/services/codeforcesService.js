@@ -6,9 +6,15 @@ const CF_API_URL = "https://codeforces.com/api/contest.list";
  * Fetches all UPCOMING contests from the Codeforces public API.
  * Returns an array of cleaned contest objects ready to be stored in MongoDB.
  */
+
 const fetchUpcomingContests = async () => {
   console.log("Calling Codeforces API...");
-  const response = await axios.get(CF_API_URL);
+  const response = await axios.get(CF_API_URL, {
+  headers: {
+    "User-Agent": "Mozilla/5.0 (compatible; YAR-bot/1.0)"
+  },
+  timeout: 10000,
+});
 
   const { status, result } = response.data;
 
@@ -17,7 +23,8 @@ const fetchUpcomingContests = async () => {
   }
 
   // phase === "BEFORE" means the contest hasn't started yet
-  const upcoming = result.filter((contest) => contest.phase === "BEFORE");
+  console.log("contests", result)
+  const upcoming = result.filter((contest) => contest.phase === "BEFORE" || contest.phase === "CODING");
 
   console.log(`Found ${upcoming.length} upcoming contest(s) from Codeforces.`);
 
