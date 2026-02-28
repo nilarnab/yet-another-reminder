@@ -29,8 +29,8 @@ async function startServer() {
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
-      console.log(`Auth endpoint    : POST http://localhost:${PORT}/auth/google`);
-      console.log(`Deliver endpoint : POST http://localhost:${PORT}/api/deliver`);
+      console.log(`Auth endpoint    : GET http://localhost:${PORT}/auth/google`);
+      console.log(`Deliver endpoint : GET http://localhost:${PORT}/api/deliver`);
     });
   } catch (err) {
     console.error("Failed to connect to MongoDB:", err);

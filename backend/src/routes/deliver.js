@@ -2,6 +2,7 @@ const express = require("express");
 const { google } = require("googleapis");
 const Event = require("../models/Event");
 const User = require("../models/User");
+const Delivery = require("../models/Delivery");
 
 const router = express.Router();
 
@@ -26,29 +27,25 @@ function buildCalendarClient(user) {
 }
 
 /**
- * Get the user's dedicated ContestSync calendar ID.
+ * Get the user's dedicated YAR calendar ID.
  * Creates one if it doesn't exist yet, then saves it to MongoDB.
  */
 async function getOrCreateContestCalendar(user, calendar) {
-  // Already created before — reuse it
   if (user.calendarId) return user.calendarId;
 
-  // Create a brand new calendar on their Google account
   const newCal = await calendar.calendars.insert({
     requestBody: {
-      summary: "ContestSync 🏆",
-      description: "Coding contests auto-synced by ContestSync",
+      summary: "YAR 🏆",
+      description: "Codeforces contests auto-synced by YAR (Yet Another Reminder)",
       timeZone: "UTC",
     },
   });
 
   const calendarId = newCal.data.id;
-
-  // Persist so we don't create duplicates on next delivery
   await User.findByIdAndUpdate(user._id, { calendarId });
-  user.calendarId = calendarId; // update in-memory too
+  user.calendarId = calendarId;
 
-  console.log(`  📅 Created ContestSync calendar for ${user.email}`);
+  console.log(`  📅 Created YAR calendar for ${user.email}`);
   return calendarId;
 }
 
@@ -59,8 +56,6 @@ async function getOrCreateContestCalendar(user, calendar) {
 async function createCalendarEvent(user, event) {
   try {
     const calendar = buildCalendarClient(user);
-
-    // Use dedicated ContestSync calendar instead of primary
     const calendarId = await getOrCreateContestCalendar(user, calendar);
 
     const endTime = new Date(
@@ -72,23 +67,14 @@ async function createCalendarEvent(user, event) {
       requestBody: {
         summary: `🏆 ${event.name}`,
         description: `Codeforces Contest\n\nDuration: ${event.durationMinutes} minutes\nJoin here: ${event.url}`,
-        start: {
-          dateTime: event.startTime.toISOString(),
-          timeZone: "UTC",
-        },
-        end: {
-          dateTime: endTime.toISOString(),
-          timeZone: "UTC",
-        },
-        source: {
-          title: "ContestSync",
-          url: event.url,
-        },
+        start: { dateTime: event.startTime.toISOString(), timeZone: "UTC" },
+        end:   { dateTime: endTime.toISOString(),         timeZone: "UTC" },
+        source: { title: "YAR", url: event.url },
         reminders: {
           useDefault: false,
           overrides: [
-            { method: "popup", minutes: 60 },  // 1 hour before
-            { method: "popup", minutes: 10 },  // 10 mins before
+            { method: "popup", minutes: 60 },
+            { method: "popup", minutes: 10 },
           ],
         },
       },
@@ -104,88 +90,95 @@ async function createCalendarEvent(user, event) {
 /**
  * POST /api/deliver
  *
- * 1. Fetch all events where is_delivered: false
- * 2. For each event, push to every user's Google Calendar
- * 3. Mark event as is_delivered: true if at least one user succeeded
- * 4. Return a full summary
+ * For every contest × every user:
+ *   1. Check if a Delivery doc exists for (userId, contestId)
+ *   2. If YES  → already delivered, skip
+ *   3. If NO   → push to Google Calendar, then insert Delivery doc
  */
-router.post("/", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    // ── Step 1: Get all undelivered events ───────────────────────────────────
-    const undeliveredEvents = await Event.find({ is_delivered: false });
+    // Fetch ALL events — delivery check is handled by the Delivery collection
+    const allEvents = await Event.find();
 
-    if (undeliveredEvents.length === 0) {
+    if (allEvents.length === 0) {
       return res.json({
         success: true,
-        message: "No undelivered events found.",
-        summary: { eventsProcessed: 0, eventsDelivered: 0 },
+        message: "No events in the database.",
+        summary: { eventsProcessed: 0 },
       });
     }
 
-    console.log(`\n========== DELIVERY JOB ==========`);
-    console.log(`Found ${undeliveredEvents.length} undelivered event(s).`);
-
-    // ── Step 2: Get all users ─────────────────────────────────────────────────
+    // Only users who have granted calendar access
     const users = await User.find({ refreshToken: { $exists: true, $ne: null } });
 
     if (users.length === 0) {
       return res.json({
         success: true,
         message: "No users with calendar access found.",
-        summary: { eventsProcessed: undeliveredEvents.length, eventsDelivered: 0 },
+        summary: { eventsProcessed: allEvents.length, usersTargeted: 0 },
       });
     }
 
-    console.log(`Delivering to ${users.length} user(s).\n`);
+    console.log(`\n========== DELIVERY JOB ==========`);
+    console.log(`Events: ${allEvents.length} | Users: ${users.length}\n`);
 
     const results = [];
 
-    // ── Step 3: For each event, push to all users ─────────────────────────────
-    for (const event of undeliveredEvents) {
+    for (const event of allEvents) {
       console.log(`Processing: "${event.name}"`);
-
-      let atLeastOneSuccess = false;
       const userResults = [];
 
       for (const user of users) {
+
+        // ── Core idempotency check ──────────────────────────────────────────
+        // Look up whether this (user, contest) pair has already been delivered
+        const alreadyDelivered = await Delivery.findOne({
+          userId:    user._id,
+          contestId: event._id,
+        });
+
+        if (alreadyDelivered) {
+          console.log(`  ↷ Skipped ${user.email} (already delivered)`);
+          userResults.push({ email: user.email, status: "skipped" });
+          continue;
+        }
+        // ───────────────────────────────────────────────────────────────────
+
+        // Not delivered yet — push to Google Calendar
         const success = await createCalendarEvent(user, event);
+
         if (success) {
-          atLeastOneSuccess = true;
+          // Record the delivery so we never push this pair again
+          await Delivery.create({ userId: user._id, contestId: event._id });
           console.log(`  ✓ Delivered to ${user.email}`);
+          userResults.push({ email: user.email, status: "delivered" });
+        } else {
+          // Do NOT create a Delivery record — let it retry next run
+          console.log(`  ✗ Failed for ${user.email}`);
+          userResults.push({ email: user.email, status: "failed" });
         }
-        else {
-            console.log(`  ✗ Failed to deliver to ${user.email}`);
-        }
-        userResults.push({ email: user.email, success });
       }
 
-      // ── Step 4: Mark as delivered if at least one user got it ─────────────
-      if (atLeastOneSuccess) {
-        await Event.findByIdAndUpdate(event._id, { is_delivered: true });
-        console.log(`  → Marked as delivered.\n`);
-      } else {
-        console.log(`  → NOT marked as delivered (all users failed).\n`);
-      }
-
-      results.push({
-        eventName: event.name,
-        startTime: event.startTime,
-        delivered: atLeastOneSuccess,
-        userResults,
-      });
+      results.push({ eventName: event.name, startTime: event.startTime, userResults });
+      console.log();
     }
 
     console.log(`========== DELIVERY COMPLETE ==========\n`);
 
-    const deliveredCount = results.filter((r) => r.delivered).length;
+    // Build summary counts across all results
+    const allUserResults = results.flatMap((r) => r.userResults);
+    const delivered = allUserResults.filter((r) => r.status === "delivered").length;
+    const skipped   = allUserResults.filter((r) => r.status === "skipped").length;
+    const failed    = allUserResults.filter((r) => r.status === "failed").length;
 
     return res.json({
       success: true,
       summary: {
-        eventsProcessed: undeliveredEvents.length,
-        eventsDelivered: deliveredCount,
-        eventsFailed: undeliveredEvents.length - deliveredCount,
-        usersTargeted: users.length,
+        eventsProcessed:  allEvents.length,
+        usersTargeted:    users.length,
+        totalDelivered:   delivered,
+        totalSkipped:     skipped,
+        totalFailed:      failed,
       },
       results,
     });
